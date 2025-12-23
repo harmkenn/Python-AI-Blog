@@ -3,15 +3,22 @@ import pandas as pd
 from docx import Document
 import fitz  # PyMuPDF for PDF processing
 import streamlit as st
+from github import Github  # PyGithub for GitHub API
+
+# --- GitHub Configuration ---
+GITHUB_TOKEN = "your_github_personal_access_token"  # Replace with your GitHub token
+REPO_NAME = "your_github_username/your_repository_name"  # Replace with your repo name
+DOCUMENTS_FOLDER = "documents"  # Folder in the repo containing the documents
+OUTPUT_CSV = "processed_blog_data.csv"  # Name of the output CSV file
 
 # --- Helper Functions ---
-def process_docx(file):
+def process_docx(file_path):
     """
     Process a single .docx file to extract text and images.
     Returns a dictionary with title, text, and image paths.
     """
-    doc = Document(file)
-    title = file.name[:-5]  # Use filename (without .docx) as title
+    doc = Document(file_path)
+    title = os.path.basename(file_path)[:-5]  # Use filename (without .docx) as title
     
     # Extract text
     text = "\n".join([paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()])
@@ -33,13 +40,13 @@ def process_docx(file):
     
     return {"title": title, "text": text, "image_paths": image_paths}
 
-def process_pdf(file):
+def process_pdf(file_path):
     """
     Process a single PDF file to extract text and images.
     Returns a dictionary with title, text, and image paths.
     """
-    title = file.name[:-4]  # Use filename (without .pdf) as title
-    pdf = fitz.open(stream=file.read(), filetype="pdf")
+    title = os.path.basename(file_path)[:-4]  # Use filename (without .pdf) as title
+    pdf = fitz.open(file_path)
     
     # Extract text
     text = ""
@@ -65,50 +72,63 @@ def process_pdf(file):
     
     return {"title": title, "text": text, "image_paths": image_paths}
 
+def process_documents(folder_path):
+    """
+    Process all .docx and .pdf files in a folder.
+    Returns a DataFrame with the extracted data.
+    """
+    data = []
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        if filename.endswith(".docx"):
+            result = process_docx(file_path)
+        elif filename.endswith(".pdf"):
+            result = process_pdf(file_path)
+        else:
+            continue
+        data.append(result)
+    return pd.DataFrame(data)
+
+def push_to_github(repo_name, file_path, commit_message, token):
+    """
+    Push a file to a GitHub repository.
+    """
+    g = Github(token)
+    repo = g.get_repo(repo_name)
+    with open(file_path, "r") as file:
+        content = file.read()
+    try:
+        # Check if the file already exists
+        contents = repo.get_contents(file_path)
+        # Update the file
+        repo.update_file(contents.path, commit_message, content, contents.sha)
+    except:
+        # Create a new file
+        repo.create_file(file_path, commit_message, content)
+
 # --- Streamlit App ---
 st.set_page_config(page_title="Document Processor", layout="wide")
 
-st.title("📄 Document Processor")
-st.markdown("Upload `.docx` and `.pdf` files to extract text and images, and save the data into a CSV file.")
+st.title("📄 Document Processor with GitHub Integration")
+st.markdown("Process `.docx` and `.pdf` files from a GitHub folder and save the data back to the repository.")
 
-# File uploader
-uploaded_files = st.file_uploader("Drag and drop your .docx or .pdf files here", type=["docx", "pdf"], accept_multiple_files=True)
-
-# Initialize DataFrame
-if "data" not in st.session_state:
-    st.session_state.data = pd.DataFrame(columns=["title", "text", "image_paths"])
-
-# Process uploaded files
-if uploaded_files:
-    for file in uploaded_files:
-        if file.name.endswith(".docx"):
-            result = process_docx(file)
-        elif file.name.endswith(".pdf"):
-            result = process_pdf(file)
-        else:
-            st.warning(f"Unsupported file type: {file.name}")
-            continue
-        
-        st.session_state.data = pd.concat(
-            [st.session_state.data, pd.DataFrame([result])], ignore_index=True
-        )
-    st.success(f"Processed {len(uploaded_files)} file(s) successfully!")
-
-# Display DataFrame
-if not st.session_state.data.empty:
-    st.markdown("### Extracted Data")
-    st.dataframe(st.session_state.data)
-
+# Process documents button
+if st.button("Process Documents"):
+    # Process all documents in the GitHub folder
+    st.info("Processing documents...")
+    data = process_documents(DOCUMENTS_FOLDER)
+    
     # Save to CSV
-    if st.button("Save to CSV"):
-        st.session_state.data.to_csv("processed_blog_data.csv", index=False)
-        st.success("Data saved to `processed_blog_data.csv`!")
-        st.markdown("You can now use this CSV file for further processing.")
+    data.to_csv(OUTPUT_CSV, index=False)
+    st.success(f"Processed data saved to `{OUTPUT_CSV}`.")
+    
+    # Push CSV to GitHub
+    st.info("Pushing processed data to GitHub...")
+    push_to_github(REPO_NAME, OUTPUT_CSV, "Add processed blog data", GITHUB_TOKEN)
+    st.success("Processed data pushed to GitHub successfully!")
 
-# Display Images
-if not st.session_state.data.empty:
-    st.markdown("### Uploaded Images")
-    for _, row in st.session_state.data.iterrows():
-        st.markdown(f"#### {row['title']}")
-        for image_path in eval(row["image_paths"]):  # Convert stringified list back to list
-            st.image(image_path, use_column_width=True)
+# Display processed data
+if os.path.exists(OUTPUT_CSV):
+    st.markdown("### Processed Data")
+    processed_data = pd.read_csv(OUTPUT_CSV)
+    st.dataframe(processed_data)
