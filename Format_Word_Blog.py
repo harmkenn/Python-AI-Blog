@@ -1,12 +1,8 @@
 import streamlit as st
 from docx import Document
-from docx.enum.text import WD_BREAK
-from docx.enum.dml import MSO_THEME_COLOR_INDEX
-from docx.enum.section import WD_ORIENT
-from docx.enum.text import WD_LINE_SPACING
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.shared import OxmlElement, qn
 from io import BytesIO
+import mammoth
 
 st.title("📄 Auto‑Format Word Document (Left‑Justify Images + Tight Wrap)")
 
@@ -66,7 +62,15 @@ if uploaded_file:
     new_doc.save(buffer)
     buffer.seek(0)
 
-    st.success("Formatting complete! Download your updated document below.")
+    st.success("Formatting complete! Scroll down to preview your document.")
+
+    # Convert to HTML for preview
+    html = mammoth.convert_to_html(buffer).value
+
+    st.markdown("### 📘 Document Preview")
+    st.components.v1.html(html, height=600, scrolling=True)
+
+    # Download button
     st.download_button(
         label="⬇️ Download formatted .docx",
         data=buffer,
